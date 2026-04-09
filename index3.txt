@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <script src="https://cdn.jsdelivr.net/npm/@svgdotjs/svg.js"></script>
+
+  <style>
+    body { height: 2000px; }
+
+    .box {
+      position: absolute;
+      width: 120px;
+      height: 80px;
+      background: #2196F3;
+      color: white;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 10px;
+    }
+
+    #a { top: 100px; left: 100px; }
+    #b { top: 300px; left: 600px; }
+    #c { top: 600px; left: 200px; }
+    #d { top: 900px; left: 800px; }
+
+    button {
+      position: fixed;
+      top: 20px;
+      right: 20px;
+    }
+  </style>
+</head>
+
+<body>
+
+<div id="a" class="box">A</div>
+<div id="b" class="box">B</div>
+<div id="c" class="box">C</div>
+<div id="d" class="box">D</div>
+
+<button onclick="switchLine()">Switch</button>
+
+<script src="app.js"></script>
+</body>
+</html>
+
+
+let draw;
+
+// ================= ENGINE =================
+
+class LeaderLineClone {
+  constructor(start, end, options = {}) {
+    this.startEl = this.getEl(start);
+    this.endEl = this.getEl(end);
+
+    this.options = {
+      color: options.color || 'red',
+      size: options.size || 3,
+      path: options.path || 'fluid', // straight | fluid
+      arrow: options.arrow ?? true
+    };
+
+    if (!draw) {
+      draw = SVG().addTo('body').size('100%', '100%').css({
+        position: 'fixed',
+        top: 0,
+        left: 0,
+        pointerEvents: 'none',
+        zIndex: 9999
+      });
+    }
+
+    this.path = draw.path().fill('none').stroke({
+      color: this.options.color,
+      width: this.options.size
+    });
+
+    // Arrow
+    if (this.options.arrow) {
+      this.marker = draw.marker(10, 10, add => {
+        add.path('M0,0 L10,5 L0,10 Z').fill(this.options.color);
+      });
+      this.path.marker('end', this.marker);
+    }
+
+    this.update = this.update.bind(this);
+
+    this.bind();
+    this.update();
+  }
+
+  getEl(el) {
+    return typeof el === 'string' ? document.querySelector(el) : el;
+  }
+
+  bind() {
+    window.addEventListener('scroll', this.update);
+    window.addEventListener('resize', this.update);
+
+    // Mutation observer (LIKE LeaderLine)
+    this.observer = new MutationObserver(this.update);
+    this.observer.observe(document.body, { childList: true, subtree: true });
+  }
+
+  getRect(el) {
+    return el.getBoundingClientRect();
+  }
+
+  getCenter(rect) {
+    return {
+      x: rect.left + rect.width / 2,
+      y: rect.top + rect.height / 2
+    };
+  }
+
+  getSocket(from, to) {
+    const dx = to.x - from.x;
+    const dy = to.y - from.y;
+
+    return Math.abs(dx) > Math.abs(dy)
+      ? (dx > 0 ? 'right' : 'left')
+      : (dy > 0 ? 'bottom' : 'top');
+  }
+
+  getPoint(rect, socket) {
+    const cx = rect.left + rect.width / 2;
+    const cy = rect.top + rect.height / 2;
+
+    const offset = 4;
+
+    switch (socket) {
+      case 'top': return { x: cx, y: rect.top - offset };
+      case 'bottom': return { x: cx, y: rect.bottom + offset };
+      case 'left': return { x: rect.left - offset, y: cy };
+      case 'right': return { x: rect.right + offset, y: cy };
+    }
+  }
+
+  buildPath(p1, p2, s1, s2) {
+    if (this.options.path === 'straight') {
+      return `M ${p1.x} ${p1.y} L ${p2.x} ${p2.y}`;
+    }
+
+    // FLUID CURVE (LeaderLine style)
+    const curve = 80;
+
+    return `M ${p1.x} ${p1.y}
+      C ${
+        s1 === 'left' ? p1.x - curve :
+        s1 === 'right' ? p1.x + curve : p1.x
+      } ${
+        s1 === 'top' ? p1.y - curve :
+        s1 === 'bottom' ? p1.y + curve : p1.y
+      },
+      ${
+        s2 === 'left' ? p2.x - curve :
+        s2 === 'right' ? p2.x + curve : p2.x
+      } ${
+        s2 === 'top' ? p2.y - curve :
+        s2 === 'bottom' ? p2.y + curve : p2.y
+      },
+      ${p2.x} ${p2.y}`;
+  }
+
+  update() {
+    if (!this.startEl || !this.endEl) return;
+
+    const r1 = this.getRect(this.startEl);
+    const r2 = this.getRect(this.endEl);
+
+    const c1 = this.getCenter(r1);
+    const c2 = this.getCenter(r2);
+
+    const s1 = this.getSocket(c1, c2);
+    const s2 = this.getSocket(c2, c1);
+
+    const p1 = this.getPoint(r1, s1);
+    const p2 = this.getPoint(r2, s2);
+
+    const d = this.buildPath(p1, p2, s1, s2);
+
+    this.path.plot(d);
+  }
+
+  // ================= RUNTIME CONTROL =================
+
+  setStart(el) {
+    this.startEl = this.getEl(el);
+    this.update();
+  }
+
+  setEnd(el) {
+    this.endEl = this.getEl(el);
+    this.update();
+  }
+
+  setOptions(opts) {
+    Object.assign(this.options, opts);
+
+    this.path.stroke({
+      color: this.options.color,
+      width: this.options.size
+    });
+
+    this.update();
+  }
+
+  remove() {
+    this.path.remove();
+    window.removeEventListener('scroll', this.update);
+    window.removeEventListener('resize', this.update);
+    this.observer.disconnect();
+  }
+}
+
+
+const line = new LeaderLineClone('#a', '#b', {
+  color: 'orange',
+  path: 'fluid',
+  arrow: true,
+});
+
+function switchLine() {
+  line.setStart('#b');
+  line.setEnd('#a');
+}
+
+setTimeout(()=>{
+    switchLine();
+},2000)
